@@ -61,6 +61,14 @@ describe('skills utils', () => {
     expect(clawdis?.requires?.bins).toEqual(['rg'])
   })
 
+  it('parses capabilities from clawdis metadata', () => {
+    const frontmatter = parseFrontmatter(
+      `---\nmetadata: {"clawdis":{"capabilities":["shell","network","unknown"]}}\n---\nBody`,
+    )
+    const clawdis = parseClawdisMetadata(frontmatter)
+    expect(clawdis?.capabilities).toEqual(['shell', 'network'])
+  })
+
   it('ignores invalid clawdis metadata', () => {
     const frontmatter = parseFrontmatter(`---\nmetadata: not-json\n---\nBody`)
     expect(parseClawdisMetadata(frontmatter)).toBeUndefined()
