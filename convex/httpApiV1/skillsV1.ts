@@ -205,6 +205,7 @@ export async function listSkillsV1Handler(ctx: ActionCtx, request: Request) {
           version: item.latestVersion.version,
           createdAt: item.latestVersion.createdAt,
           changelog: item.latestVersion.changelog,
+          capabilities: item.latestVersion.parsed?.clawdis?.capabilities ?? [],
         }
       : null,
     metadata: item.latestVersion?.parsed?.clawdis
@@ -301,6 +302,7 @@ export async function skillsGetRouterV1Handler(ctx: ActionCtx, request: Request)
               version: result.latestVersion.version,
               createdAt: result.latestVersion.createdAt,
               changelog: result.latestVersion.changelog,
+              capabilities: result.latestVersion.parsed?.clawdis?.capabilities ?? [],
             }
           : null,
         metadata: result.latestVersion?.parsed?.clawdis
