@@ -19,6 +19,7 @@ const SHARED_KEYS = [
   'canonicalSkillId',
   'forkOf',
   'latestVersionId',
+  'latestVersionSummary',
   'tags',
   'badges',
   'stats',

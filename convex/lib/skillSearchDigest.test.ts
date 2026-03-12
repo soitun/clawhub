@@ -102,7 +102,7 @@ describe('extractDigestFields', () => {
 
     expect(digest).not.toHaveProperty('moderationEvidence')
     expect(digest).not.toHaveProperty('quality')
-    expect(digest).not.toHaveProperty('latestVersionSummary')
+    expect(digest).toHaveProperty('latestVersionSummary')
     expect(digest).not.toHaveProperty('moderationNotes')
     expect(digest).not.toHaveProperty('moderationSummary')
     expect(digest).not.toHaveProperty('resourceId')

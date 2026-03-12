@@ -448,6 +448,17 @@ const skillSearchDigest = defineTable({
   canonicalSkillId: v.optional(v.id('skills')),
   forkOf: forkOfValidator,
   latestVersionId: v.optional(v.id('skillVersions')),
+  latestVersionSummary: v.optional(
+    v.object({
+      version: v.string(),
+      createdAt: v.number(),
+      changelog: v.string(),
+      changelogSource: v.optional(
+        v.union(v.literal('auto'), v.literal('user')),
+      ),
+      clawdis: v.optional(v.any()),
+    }),
+  ),
   tags: v.record(v.string(), v.id('skillVersions')),
   badges: badgesValidator,
   stats: statsValidator,

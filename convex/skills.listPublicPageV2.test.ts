@@ -333,6 +333,12 @@ function makeSkill(
     canonicalSkillId: undefined,
     forkOf: undefined,
     latestVersionId,
+    latestVersionSummary: {
+      version: '1.0.0',
+      createdAt: 1,
+      changelog: '',
+      changelogSource: 'user' as const,
+    },
     tags: {},
     badges: {},
     stats: {

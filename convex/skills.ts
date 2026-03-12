@@ -958,11 +958,7 @@ async function buildPublicSkillEntries(
   const entries = await Promise.all(
     skills.map(async (skill) => {
       // Use denormalized summary when available to avoid reading the full ~6KB version doc.
-      // HydratableSkill (from digest rows) won't have latestVersionSummary.
-      const summary =
-        'latestVersionSummary' in skill
-          ? (skill as Doc<'skills'>).latestVersionSummary
-          : undefined
+      const summary = skill.latestVersionSummary
       const hasSummary = includeVersion && summary
       const [latestVersionDoc, ownerInfo] = await Promise.all([
         includeVersion && !hasSummary && skill.latestVersionId

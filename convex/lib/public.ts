@@ -41,6 +41,7 @@ export type HydratableSkill = Pick<
   | 'canonicalSkillId'
   | 'forkOf'
   | 'latestVersionId'
+  | 'latestVersionSummary'
   | 'tags'
   | 'badges'
   | 'stats'
