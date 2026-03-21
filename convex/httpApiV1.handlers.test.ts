@@ -2232,8 +2232,9 @@ describe("httpApiV1 handlers", () => {
 
   it("packages search forwards executesCode and capabilityTag", async () => {
     const runQuery = vi.fn().mockResolvedValue([]);
+    const runMutation = vi.fn().mockResolvedValue(okRate());
     const response = await __handlers.packagesGetRouterV1Handler(
-      makeCtx({ runQuery }),
+      makeCtx({ runQuery, runMutation }),
       new Request(
         "https://example.com/api/v1/packages/search?q=test&executesCode=true&capabilityTag=tools&limit=5",
       ),
@@ -2248,14 +2249,23 @@ describe("httpApiV1 handlers", () => {
         capabilityTag: "tools",
       }),
     );
+    expect(runMutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: expect.stringMatching(/^ip:/),
+        limit: 120,
+      }),
+    );
+    expect(response.headers.get("RateLimit-Limit")).toBeTruthy();
   });
 
   it("packages detail hides private packages from anonymous requests", async () => {
     vi.mocked(getOptionalApiTokenUserId).mockResolvedValue(null);
     const runQuery = vi.fn().mockResolvedValue(null);
+    const runMutation = vi.fn().mockResolvedValue(okRate());
 
     const response = await __handlers.packagesGetRouterV1Handler(
-      makeCtx({ runQuery }),
+      makeCtx({ runQuery, runMutation }),
       new Request("https://example.com/api/v1/packages/private-plugin"),
     );
 
@@ -2265,6 +2275,115 @@ describe("httpApiV1 handlers", () => {
       expect.objectContaining({
         name: "private-plugin",
         viewerUserId: undefined,
+      }),
+    );
+  });
+
+  it("package download uses download rate limiting", async () => {
+    const runMutation = vi.fn().mockResolvedValue(okRate());
+    const runQuery = vi.fn(async (_query: unknown, args: Record<string, unknown>) => {
+      if ("name" in args) {
+        return {
+          package: {
+            _id: "packages:1",
+            name: "demo-plugin",
+            displayName: "Demo Plugin",
+            family: "code-plugin",
+            tags: {},
+            latestReleaseId: "packageReleases:1",
+            channel: "community",
+            isOfficial: false,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          latestRelease: null,
+          owner: null,
+        };
+      }
+      if ("releaseId" in args) {
+        return {
+          _id: "packageReleases:1",
+          version: "1.0.0",
+          createdAt: 1,
+          changelog: "init",
+          files: [
+            {
+              path: "package.json",
+              size: 2,
+              sha256: "a".repeat(64),
+              storageId: "storage:1",
+              contentType: "application/json",
+            },
+          ],
+        };
+      }
+      return null;
+    });
+
+    const response = await __handlers.packagesGetRouterV1Handler(
+      makeCtx({
+        runQuery,
+        runMutation,
+        storage: {
+          get: vi.fn().mockResolvedValue(new Blob(["{}"], { type: "application/json" })),
+        },
+      }),
+      new Request("https://example.com/api/v1/packages/demo-plugin/download"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("RateLimit-Limit")).toBeTruthy();
+    expect(runMutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: expect.stringMatching(/^ip:/),
+        limit: 20,
+      }),
+    );
+  });
+
+  it("package publish uses write rate limiting", async () => {
+    vi.mocked(getOptionalApiTokenUserId).mockResolvedValue("users:1" as never);
+    vi.mocked(requireApiTokenUser).mockResolvedValue({
+      userId: "users:1",
+      user: { _id: "users:1", handle: "p" },
+    } as never);
+    const runMutation = vi.fn().mockResolvedValue(okRate());
+    const runAction = vi.fn().mockResolvedValue({ ok: true, packageId: "pkg:1", releaseId: "rel:1" });
+
+    const response = await __handlers.publishPackageV1Handler(
+      makeCtx({ runAction, runMutation }),
+      new Request("https://example.com/api/v1/packages", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer clh_test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "demo-plugin",
+          family: "bundle-plugin",
+          version: "1.0.0",
+          changelog: "init",
+          bundle: { hostTargets: ["desktop"] },
+          files: [
+            {
+              path: "openclaw.bundle.json",
+              size: 2,
+              storageId: "storage:1",
+              sha256: "a".repeat(64),
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("RateLimit-Limit")).toBeTruthy();
+    expect(runMutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: "user:users:1",
+        limit: 120,
       }),
     );
   });

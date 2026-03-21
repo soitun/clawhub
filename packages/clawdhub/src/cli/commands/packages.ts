@@ -94,6 +94,9 @@ export async function cmdExplorePackages(
       url.searchParams.set("limit", String(limit));
       if (options.family) url.searchParams.set("family", options.family);
       if (options.official) url.searchParams.set("isOfficial", "true");
+      if (typeof options.executesCode === "boolean") {
+        url.searchParams.set("executesCode", String(options.executesCode));
+      }
       const result = await apiRequest(
         registry,
         { method: "GET", url: url.toString(), token },

@@ -93,13 +93,17 @@ describe("package commands", () => {
       ],
     });
 
-    await cmdExplorePackages(makeOpts(), "demo plugin", { family: "code-plugin" });
+    await cmdExplorePackages(makeOpts(), "demo plugin", {
+      family: "code-plugin",
+      executesCode: true,
+    });
 
     const request = mockApiRequest.mock.calls[0]?.[1] as { url?: string } | undefined;
     const url = new URL(String(request?.url));
     expect(url.pathname).toBe("/api/v1/packages/search");
     expect(url.searchParams.get("q")).toBe("demo plugin");
     expect(url.searchParams.get("family")).toBe("code-plugin");
+    expect(url.searchParams.get("executesCode")).toBe("true");
   });
 
   it("uses tag param when fetching a package file", async () => {

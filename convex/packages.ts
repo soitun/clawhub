@@ -22,7 +22,8 @@ import { toPublicUser } from "./lib/public";
 import { hashSkillFiles } from "./lib/skills";
 
 const MAX_PACKAGE_BYTES = 50 * 1024 * 1024;
-const MAX_SEARCH_SCAN = 200;
+const MAX_SEARCH_PAGE_SIZE = 200;
+const MAX_SEARCH_SCAN_PAGES = 200;
 const apiRefs = api as unknown as {
   packages: {
     publishPackage: unknown;
@@ -207,6 +208,38 @@ function packageSearchScore(digest: Doc<"packageSearchDigest">, queryText: strin
   return score;
 }
 
+function buildPackageDigestQuery(
+  ctx: DbReaderCtx,
+  args: {
+    family?: PackageFamily;
+    channel?: PackageChannel;
+    isOfficial?: boolean;
+  },
+) {
+  const family = args.family;
+  const channel = args.channel;
+  const isOfficial = args.isOfficial;
+
+  if (family && channel) {
+    return ctx.db.query("packageSearchDigest").withIndex("by_active_family_channel_updated", (q) =>
+      q.eq("softDeletedAt", undefined).eq("family", family).eq("channel", channel),
+    );
+  }
+  if (family && typeof isOfficial === "boolean") {
+    return ctx.db.query("packageSearchDigest").withIndex("by_active_family_official_updated", (q) =>
+      q.eq("softDeletedAt", undefined).eq("family", family).eq("isOfficial", isOfficial),
+    );
+  }
+  if (family) {
+    return ctx.db.query("packageSearchDigest").withIndex("by_active_family_updated", (q) =>
+      q.eq("softDeletedAt", undefined).eq("family", family),
+    );
+  }
+  return ctx.db.query("packageSearchDigest").withIndex("by_active_updated", (q) =>
+    q.eq("softDeletedAt", undefined),
+  );
+}
+
 async function getPackageByNormalizedName(ctx: DbReaderCtx, normalizedName: string) {
   return (await ctx.db
     .query("packages")
@@ -315,32 +348,7 @@ export const listPublicPage = query({
     while (!done && collected.length < targetCount && loops < 5) {
       loops += 1;
       const pageSize = Math.max(targetCount * 3, targetCount);
-      const builder =
-        family && channel
-          ? ctx.db
-              .query("packageSearchDigest")
-              .withIndex("by_active_family_channel_updated", (q) =>
-                q.eq("softDeletedAt", undefined).eq("family", family).eq("channel", channel),
-              )
-          : family && typeof isOfficial === "boolean"
-            ? ctx.db
-                .query("packageSearchDigest")
-                .withIndex("by_active_family_official_updated", (q) =>
-                  q
-                    .eq("softDeletedAt", undefined)
-                    .eq("family", family)
-                    .eq("isOfficial", isOfficial),
-                )
-            : family
-              ? ctx.db
-                  .query("packageSearchDigest")
-                  .withIndex("by_active_family_updated", (q) =>
-                    q.eq("softDeletedAt", undefined).eq("family", family),
-                  )
-              : ctx.db
-                  .query("packageSearchDigest")
-                  .withIndex("by_active_updated", (q) => q.eq("softDeletedAt", undefined));
-
+      const builder = buildPackageDigestQuery(ctx, { family, channel, isOfficial });
       const page = await builder.order("desc").paginate({ cursor, numItems: pageSize });
       for (const digest of page.page) {
         if (digest.channel === "private") continue;
@@ -387,42 +395,49 @@ export const searchPublic = query({
     const queryText = args.query.trim().toLowerCase();
     if (!queryText) return [];
     if (args.channel === "private") return [];
-    const family = args.family;
-    const base =
-      family
-        ? await ctx.db
-            .query("packageSearchDigest")
-            .withIndex("by_active_family_updated", (q) =>
-              q.eq("softDeletedAt", undefined).eq("family", family),
-            )
-            .order("desc")
-            .take(MAX_SEARCH_SCAN)
-        : await ctx.db
-            .query("packageSearchDigest")
-            .withIndex("by_active_updated", (q) => q.eq("softDeletedAt", undefined))
-            .order("desc")
-            .take(MAX_SEARCH_SCAN);
+    const targetCount = Math.max(1, Math.min(args.limit ?? 20, 100));
+    const builder = buildPackageDigestQuery(ctx, {
+      family: args.family,
+      channel: args.channel,
+      isOfficial: args.isOfficial,
+    });
+    const matches: Array<{ score: number; package: PublicPackageListItem }> = [];
+    const seen = new Set<string>();
+    const pageSize = Math.min(MAX_SEARCH_PAGE_SIZE, Math.max(targetCount * 5, 50));
+    let cursor: string | null = null;
+    let done = false;
+    let loops = 0;
 
-    const filtered = base
-      .filter((digest) => digest.channel !== "private")
-      .filter((digest) => (args.channel ? digest.channel === args.channel : true))
-      .filter((digest) =>
-        typeof args.isOfficial === "boolean" ? digest.isOfficial === args.isOfficial : true,
-      )
-      .filter((digest) => digestMatchesFilters(digest, args))
-      .map((digest) => ({
-        score: packageSearchScore(digest, queryText),
-        package: toPublicPackageListItem(digest),
-      }))
-      .filter((entry) => entry.score > 0)
+    while (!done && loops < MAX_SEARCH_SCAN_PAGES) {
+      loops += 1;
+      const page = await builder.order("desc").paginate({ cursor, numItems: pageSize });
+      for (const digest of page.page) {
+        if (digest.channel === "private") continue;
+        if (args.channel && digest.channel !== args.channel) continue;
+        if (typeof args.isOfficial === "boolean" && digest.isOfficial !== args.isOfficial) {
+          continue;
+        }
+        if (!digestMatchesFilters(digest, args)) continue;
+        const score = packageSearchScore(digest, queryText);
+        if (score <= 0 || seen.has(digest.name)) continue;
+        seen.add(digest.name);
+        matches.push({
+          score,
+          package: toPublicPackageListItem(digest),
+        });
+      }
+      done = page.isDone;
+      cursor = page.continueCursor;
+    }
+
+    return matches
       .sort(
         (a, b) =>
           b.score - a.score ||
           Number(b.package.isOfficial) - Number(a.package.isOfficial) ||
           b.package.updatedAt - a.package.updatedAt,
-      );
-
-    return filtered.slice(0, Math.max(1, Math.min(args.limit ?? 20, 100)));
+      )
+      .slice(0, targetCount);
   },
 });
 
@@ -626,6 +641,11 @@ export const insertReleaseInternal = internalMutation({
     const existing = await getPackageByNormalizedName(ctx, normalizedName);
     if (existing && existing.ownerUserId !== args.userId) {
       throw new ConvexError("Package already exists and belongs to another user");
+    }
+    if (existing && existing.family !== args.family) {
+      throw new ConvexError(
+        `Package "${args.name}" already exists as a ${existing.family}; family changes are not allowed`,
+      );
     }
     if (args.family === "code-plugin" && args.runtimeId) {
       const runtimeCollision = await ctx.db

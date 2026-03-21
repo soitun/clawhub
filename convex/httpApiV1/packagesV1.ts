@@ -3,6 +3,8 @@ import { api, internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { ActionCtx } from "../_generated/server";
 import { getOptionalApiTokenUserId } from "../lib/apiTokenAuth";
+import { corsHeaders, mergeHeaders } from "../lib/httpHeaders";
+import { applyRateLimit } from "../lib/httpRateLimit";
 import { buildDeterministicZip } from "../lib/skillZip";
 import { isTextFile } from "../lib/skills";
 import {
@@ -152,6 +154,9 @@ async function parseMultipartPackagePublish(ctx: ActionCtx, request: Request) {
 }
 
 async function listPackages(ctx: ActionCtx, request: Request, family?: PackageListQueryArgs["family"]) {
+  const rate = await applyRateLimit(ctx, request, "read");
+  if (!rate.ok) return rate.response;
+
   const limit = Math.max(1, Math.min(toOptionalNumber(new URL(request.url).searchParams.get("limit")) ?? 25, 100));
   const cursor = new URL(request.url).searchParams.get("cursor");
   const channelRaw = new URL(request.url).searchParams.get("channel")?.trim();
@@ -175,7 +180,11 @@ async function listPackages(ctx: ActionCtx, request: Request, family?: PackageLi
     capabilityTag,
     paginationOpts: { cursor, numItems: limit },
   } satisfies PackageListQueryArgs);
-  return json({ items: result.page, nextCursor: result.isDone ? null : result.continueCursor });
+  return json(
+    { items: result.page, nextCursor: result.isDone ? null : result.continueCursor },
+    200,
+    rate.headers,
+  );
 }
 
 export async function listPackagesV1Handler(ctx: ActionCtx, request: Request) {
@@ -191,7 +200,10 @@ export async function listBundlePluginsV1Handler(ctx: ActionCtx, request: Reques
 }
 
 export async function publishPackageV1Handler(ctx: ActionCtx, request: Request) {
-  const auth = await requireApiTokenUserOrResponse(ctx, request, {});
+  const rate = await applyRateLimit(ctx, request, "write");
+  if (!rate.ok) return rate.response;
+
+  const auth = await requireApiTokenUserOrResponse(ctx, request, rate.headers);
   if (!auth.ok) return auth.response;
 
   try {
@@ -203,9 +215,9 @@ export async function publishPackageV1Handler(ctx: ActionCtx, request: Request) 
       userId: auth.userId,
       payload,
     });
-    return json(result);
+    return json(result, 200, rate.headers);
   } catch (error) {
-    return text(error instanceof Error ? error.message : "Publish failed", 400);
+    return text(error instanceof Error ? error.message : "Publish failed", 400, rate.headers);
   }
 }
 
@@ -245,6 +257,10 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
   const segments = getPathSegments(request, "/api/v1/packages/");
   if (segments.length === 0) return text("Not found", 404);
 
+  const rateKind = segments[1] === "file" || segments[1] === "download" ? "download" : "read";
+  const rate = await applyRateLimit(ctx, request, rateKind);
+  if (!rate.ok) return rate.response;
+
   if (segments[0] === "search") {
     const url = new URL(request.url);
     const queryText = url.searchParams.get("q")?.trim() ?? "";
@@ -271,7 +287,7 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
         executesCodeRaw === "true" ? true : executesCodeRaw === "false" ? false : undefined,
       capabilityTag,
     });
-    return json({ results });
+    return json({ results }, 200, rate.headers);
   }
 
   const packageName = segments[0] ?? "";
@@ -291,7 +307,7 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
       }
     | null;
 
-  if (!detail?.package) return text("Package not found", 404);
+  if (!detail?.package) return text("Package not found", 404, rate.headers);
 
   if (segments.length === 1) {
     return json({
@@ -306,7 +322,7 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
             image: detail.owner.image ?? null,
           }
         : null,
-    });
+    }, 200, rate.headers);
   }
 
   if (segments[1] === "versions" && segments.length === 2) {
@@ -329,7 +345,7 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
         distTags: release.distTags ?? [],
       })),
       nextCursor: result.isDone ? null : result.continueCursor,
-    });
+    }, 200, rate.headers);
   }
 
   if (segments[1] === "versions" && segments[2]) {
@@ -342,7 +358,7 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
         viewerUserId: viewerUserId ?? undefined,
       },
     )) as { package: PublicPackageDocLike; version: ReleaseLike } | null;
-    if (!result) return text("Version not found", 404);
+    if (!result) return text("Version not found", 404, rate.headers);
     return json({
       package: {
         name: result.package.name,
@@ -364,20 +380,22 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
         capabilities: result.version.capabilities ?? null,
         verification: result.version.verification ?? null,
       },
-    });
+    }, 200, rate.headers);
   }
 
   if (segments[1] === "file") {
     const path = new URL(request.url).searchParams.get("path")?.trim();
-    if (!path) return text("Missing path", 400);
+    if (!path) return text("Missing path", 400, rate.headers);
     const release = await getReleaseForRequest(ctx, detail.package, request);
-    if (!release) return text("Version not found", 404);
+    if (!release) return text("Version not found", 404, rate.headers);
     const file = release.files.find((entry) => entry.path === path);
-    if (!file) return text("File not found", 404);
-    if (!isTextFile(file.path, file.contentType)) return text("Binary files are not served inline", 415);
-    if (file.size > MAX_RAW_FILE_BYTES) return text("File too large", 413);
+    if (!file) return text("File not found", 404, rate.headers);
+    if (!isTextFile(file.path, file.contentType)) {
+      return text("Binary files are not served inline", 415, rate.headers);
+    }
+    if (file.size > MAX_RAW_FILE_BYTES) return text("File too large", 413, rate.headers);
     const blob = await ctx.storage.get(file.storageId);
-    if (!blob) return text("File not found", 404);
+    if (!blob) return text("File not found", 404, rate.headers);
     const textContent = await blob.text();
     return safeTextFileResponse({
       textContent,
@@ -385,12 +403,13 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
       contentType: file.contentType,
       sha256: file.sha256,
       size: file.size,
+      headers: rate.headers,
     });
   }
 
   if (segments[1] === "download") {
     const release = await getReleaseForRequest(ctx, detail.package, request);
-    if (!release) return text("Version not found", 404);
+    if (!release) return text("Version not found", 404, rate.headers);
     const entries: Array<{ path: string; bytes: Uint8Array }> = [];
     for (const file of release.files) {
       const blob = await ctx.storage.get(file.storageId);
@@ -408,14 +427,18 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
     });
     return new Response(new Blob([zip], { type: "application/zip" }), {
       status: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${detail.package.name.replaceAll("/", "-")}-${release.version}.zip"`,
-      },
+      headers: mergeHeaders(
+        rate.headers,
+        {
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="${detail.package.name.replaceAll("/", "-")}-${release.version}.zip"`,
+        },
+        corsHeaders(),
+      ),
     });
   }
 
-  return text("Not found", 404);
+  return text("Not found", 404, rate.headers);
 }
 
 type PublicPackageDocLike = {
