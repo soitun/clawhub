@@ -1,6 +1,6 @@
 /* @vitest-environment node */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const getRequestHeadersMock = vi.fn();
 const getRequestUrlMock = vi.fn();
 vi.mock("@tanstack/react-start/server", () => ({
@@ -17,6 +17,10 @@ import {
 } from "./packageApi";
 
 describe("fetchPackages", () => {
+  beforeEach(() => {
+    vi.stubEnv("VITE_CONVEX_SITE_URL", "");
+  });
+
   afterEach(() => {
     getRequestHeadersMock.mockReset();
     getRequestUrlMock.mockReset();
