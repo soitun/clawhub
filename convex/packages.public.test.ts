@@ -11,6 +11,7 @@ import {
   listPublicPage,
   listPageForViewerInternal,
   listVersions,
+  softDeletePackageInternal,
   searchForViewerInternal,
   searchPublic,
 } from "./packages";
@@ -151,6 +152,12 @@ const publishPackageForUserInternalHandler = (
       payload: unknown;
     },
     unknown
+  >
+)._handler;
+const softDeletePackageInternalHandler = (
+  softDeletePackageInternal as unknown as WrappedHandler<
+    { userId: string; name: string },
+    { ok: true; packageId: string; releaseCount: number; alreadyDeleted: boolean }
   >
 )._handler;
 
@@ -421,6 +428,50 @@ function makePackageCtx(options: {
           }
           throw new Error(`Unexpected table ${table}`);
         }),
+      },
+    },
+  };
+}
+
+function makeSoftDeletePackageCtx(options?: {
+  pkg?: Record<string, unknown> | null;
+  releases?: Array<Record<string, unknown>>;
+  user?: Record<string, unknown> | null;
+}) {
+  const pkg = options?.pkg ?? makePackageDoc();
+  const releases = options?.releases ?? [makeReleaseDoc()];
+  const user = options?.user ?? { _id: "users:owner", role: "user" };
+  const patch = vi.fn();
+  return {
+    patch,
+    ctx: {
+      db: {
+        get: vi.fn(async (id: string) => {
+          if (id === "users:owner" || id === "users:moderator") return user;
+          return null;
+        }),
+        query: vi.fn((table: string) => {
+          if (table === "packages") {
+            return {
+              withIndex: vi.fn(() => ({
+                unique: vi.fn().mockResolvedValue(pkg),
+              })),
+            };
+          }
+          if (table === "packageReleases") {
+            return {
+              withIndex: vi.fn(() => ({
+                collect: vi.fn().mockResolvedValue(releases),
+              })),
+            };
+          }
+          throw new Error(`Unexpected table ${table}`);
+        }),
+        patch,
+        insert: vi.fn(),
+        replace: vi.fn(),
+        delete: vi.fn(),
+        normalizeId: vi.fn(),
       },
     },
   };
@@ -998,6 +1049,51 @@ describe("packages public queries", () => {
 
     expect(result.page.map((entry) => entry.version)).toEqual(["1.0.0"]);
     expect(releaseIndexNames).toContain("by_package_active_created");
+  });
+
+  it("soft-deletes packages and active releases for the owner", async () => {
+    const { ctx, patch } = makeSoftDeletePackageCtx({
+      releases: [
+        makeReleaseDoc(),
+        makeReleaseDoc({ _id: "packageReleases:demo-2", version: "1.1.0", softDeletedAt: 123 }),
+      ],
+    });
+
+    const result = await softDeletePackageInternalHandler(ctx, {
+      userId: "users:owner",
+      name: "demo-plugin",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      packageId: "packages:demo",
+      releaseCount: 1,
+      alreadyDeleted: false,
+    });
+    expect(patch).toHaveBeenCalledWith("packageReleases:demo-1", {
+      softDeletedAt: expect.any(Number),
+    });
+    expect(patch).toHaveBeenCalledWith(
+      "packages:demo",
+      expect.objectContaining({
+        softDeletedAt: expect.any(Number),
+        updatedAt: expect.any(Number),
+      }),
+    );
+  });
+
+  it("rejects non-owner package soft deletes without moderator access", async () => {
+    const { ctx } = makeSoftDeletePackageCtx({
+      pkg: makePackageDoc({ ownerUserId: "users:someone-else" }),
+      user: { _id: "users:owner", role: "user" },
+    });
+
+    await expect(
+      softDeletePackageInternalHandler(ctx, {
+        userId: "users:owner",
+        name: "demo-plugin",
+      }),
+    ).rejects.toThrow("Forbidden");
   });
 
   it("rejects family changes on an existing package name", async () => {

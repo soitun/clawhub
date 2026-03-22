@@ -13,7 +13,7 @@ import { action, internalAction, internalMutation, internalQuery, query } from "
 import type { Doc, Id } from "./_generated/dataModel";
 import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
 import { requireGitHubAccountAge } from "./lib/githubAccount";
-import { requireUserFromAction } from "./lib/access";
+import { assertModerator, requireUserFromAction } from "./lib/access";
 import {
   assertPackageVersion,
   ensurePluginNameMatchesPackage,
@@ -858,6 +858,60 @@ export const getPackageByNameInternal = internalQuery({
   args: { name: v.string() },
   handler: async (ctx, args) => {
     return await getPackageByNormalizedName(ctx, normalizePackageName(args.name));
+  },
+});
+
+export const softDeletePackageInternal = internalMutation({
+  args: {
+    userId: v.id("users"),
+    name: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user || user.deletedAt || user.deactivatedAt) throw new Error("User not found");
+
+    const normalizedName = normalizePackageName(args.name);
+    if (!normalizedName) throw new Error("Package name required");
+
+    const pkg = await getPackageByNormalizedName(ctx, normalizedName);
+    if (!pkg) throw new Error("Package not found");
+
+    if (pkg.ownerUserId !== args.userId) {
+      assertModerator(user);
+    }
+
+    if (pkg.softDeletedAt) {
+      return {
+        ok: true as const,
+        packageId: pkg._id,
+        releaseCount: 0,
+        alreadyDeleted: true as const,
+      };
+    }
+
+    const now = Date.now();
+    const releases = await ctx.db
+      .query("packageReleases")
+      .withIndex("by_package", (q) => q.eq("packageId", pkg._id))
+      .collect();
+    let releaseCount = 0;
+    for (const release of releases) {
+      if (release.softDeletedAt) continue;
+      await ctx.db.patch(release._id, { softDeletedAt: now });
+      releaseCount += 1;
+    }
+
+    await ctx.db.patch(pkg._id, {
+      softDeletedAt: now,
+      updatedAt: now,
+    });
+
+    return {
+      ok: true as const,
+      packageId: pkg._id,
+      releaseCount,
+      alreadyDeleted: false as const,
+    };
   },
 });
 
