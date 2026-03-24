@@ -20,12 +20,12 @@ type PluginDetailLoaderData = {
 
 export const Route = createFileRoute("/plugins/$name")({
   loader: async ({ params }): Promise<PluginDetailLoaderData> => {
+    const readmePromise = fetchPackageReadme(params.name);
     const detail = await fetchPackageDetail(params.name);
-    const version =
-      detail.package?.latestVersion
-        ? await fetchPackageVersion(params.name, detail.package.latestVersion)
-        : null;
-    const readme = await fetchPackageReadme(params.name, detail.package?.latestVersion);
+    const versionPromise = detail.package?.latestVersion
+      ? fetchPackageVersion(params.name, detail.package.latestVersion)
+      : Promise.resolve(null);
+    const [version, readme] = await Promise.all([versionPromise, readmePromise]);
     return { detail, version, readme };
   },
   head: ({ params, loaderData }) => ({
