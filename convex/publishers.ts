@@ -6,6 +6,7 @@ import { internalMutation, internalQuery, mutation, query } from "./functions";
 import { assertAdmin, requireUser } from "./lib/access";
 import {
   ensurePersonalPublisherForUser,
+  getActiveUserByHandleOrPersonalPublisher,
   getPublisherByHandle,
   getPublisherMembership,
   getPersonalPublisherForUserOrFallback,
@@ -584,11 +585,8 @@ export const addMember = mutation({
     }
     const handle = normalizePublisherHandle(args.userHandle);
     if (!handle) throw new ConvexError("User handle is required");
-    const targetUser = await ctx.db
-      .query("users")
-      .withIndex("handle", (q) => q.eq("handle", handle))
-      .unique();
-    if (!targetUser || targetUser.deletedAt || targetUser.deactivatedAt) {
+    const targetUser = await getActiveUserByHandleOrPersonalPublisher(ctx, handle);
+    if (!targetUser) {
       throw new ConvexError(`User "@${handle}" not found`);
     }
     await ensurePersonalPublisherForUser(ctx, targetUser);

@@ -61,7 +61,7 @@ describe("skillTransfers", () => {
             if (table === "users") {
               return {
                 withIndex: () => ({
-                  first: async () => ({ _id: "users:2", handle: "alice", displayName: "Alice" }),
+                  unique: async () => ({ _id: "users:2", handle: "alice", displayName: "Alice" }),
                 }),
               };
             }
@@ -98,6 +98,101 @@ describe("skillTransfers", () => {
         fromUserId: "users:1",
         toUserId: "users:2",
         status: "pending",
+      }),
+    );
+  });
+
+  it("requestTransferInternal resolves recipient via personal publisher handle", async () => {
+    const insert = vi.fn(async (table: string) => {
+      if (table === "skillOwnershipTransfers") return "skillOwnershipTransfers:new";
+      return "auditLogs:1";
+    });
+
+    const result = (await requestTransferInternalHandler(
+      {
+        db: {
+          normalizeId: vi.fn(),
+          get: vi.fn(async (id: string) => {
+            if (id === "users:1") return { _id: "users:1", handle: "owner" };
+            if (id === "users:2") {
+              return {
+                _id: "users:2",
+                handle: undefined,
+                name: "Alice",
+                displayName: "Alice",
+              };
+            }
+            if (id === "skills:1") {
+              return {
+                _id: "skills:1",
+                slug: "demo",
+                displayName: "Demo",
+                ownerUserId: "users:1",
+              };
+            }
+            if (id === "publishers:alice") {
+              return {
+                _id: "publishers:alice",
+                kind: "user",
+                handle: "alice",
+                displayName: "Alice",
+                linkedUserId: "users:2",
+              };
+            }
+            return null;
+          }),
+          query: vi.fn((table: string) => {
+            if (table === "users") {
+              return {
+                withIndex: () => ({
+                  unique: async () => null,
+                }),
+              };
+            }
+            if (table === "publishers") {
+              return {
+                withIndex: () => ({
+                  unique: async () => ({
+                    _id: "publishers:alice",
+                    kind: "user",
+                    handle: "alice",
+                    displayName: "Alice",
+                    linkedUserId: "users:2",
+                  }),
+                }),
+              };
+            }
+            if (table === "skillOwnershipTransfers") {
+              return {
+                withIndex: () => ({
+                  collect: async () => [],
+                }),
+              };
+            }
+            throw new Error(`unexpected table ${table}`);
+          }),
+          patch: vi.fn(async () => {}),
+          insert,
+        },
+      } as never,
+      {
+        actorUserId: "users:1",
+        skillId: "skills:1",
+        toUserHandle: "@alice",
+      } as never,
+    )) as { ok: boolean; transferId: string };
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        transferId: "skillOwnershipTransfers:new",
+        toUserHandle: "alice",
+      }),
+    );
+    expect(insert).toHaveBeenCalledWith(
+      "skillOwnershipTransfers",
+      expect.objectContaining({
+        toUserId: "users:2",
       }),
     );
   });

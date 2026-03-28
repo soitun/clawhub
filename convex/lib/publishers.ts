@@ -97,6 +97,36 @@ export async function getPublisherByHandle(
   }
 }
 
+export async function getUserByHandleOrPersonalPublisher(
+  ctx: DbCtx,
+  handle: string | undefined | null,
+) {
+  const normalized = normalizePublisherHandle(handle);
+  if (!normalized) return null;
+
+  const user = await ctx.db
+    .query("users")
+    .withIndex("handle", (q) => q.eq("handle", normalized))
+    .unique();
+  if (user) return user;
+
+  const publisher = await getPublisherByHandle(ctx, normalized);
+  if (!publisher || !isPublisherActive(publisher) || publisher.kind !== "user" || !publisher.linkedUserId) {
+    return null;
+  }
+
+  return await ctx.db.get(publisher.linkedUserId);
+}
+
+export async function getActiveUserByHandleOrPersonalPublisher(
+  ctx: DbCtx,
+  handle: string | undefined | null,
+) {
+  const user = await getUserByHandleOrPersonalPublisher(ctx, handle);
+  if (!user || user.deletedAt || user.deactivatedAt) return null;
+  return user;
+}
+
 export async function getPersonalPublisherForUser(
   ctx: DbCtx,
   userId: Id<"users">,

@@ -616,6 +616,54 @@ describe("users.getByHandle", () => {
       bio: "Profile",
     });
   });
+
+  it("does not resolve a deleted personal publisher handle", async () => {
+    const userUnique = vi.fn(async () => null);
+    const publisherUnique = vi.fn(async () => ({
+      _id: "publishers:jaredforreal",
+      kind: "user",
+      handle: "jaredforreal",
+      linkedUserId: "users:owner",
+      deletedAt: 1_700_000_000_000,
+      displayName: "Jared",
+    }));
+    const get = vi.fn(async () => {
+      throw new Error("linked user should not be loaded for inactive publishers");
+    });
+
+    const result = await getByHandleHandler(
+      {
+        db: {
+          query: vi.fn((table: string) => {
+            if (table === "users") {
+              return {
+                withIndex: (name: string) => {
+                  if (name !== "handle") throw new Error(`Unexpected users index ${name}`);
+                  return { unique: userUnique };
+                },
+              };
+            }
+            if (table === "publishers") {
+              return {
+                withIndex: (name: string) => {
+                  if (name !== "by_handle") throw new Error(`Unexpected publishers index ${name}`);
+                  return { unique: publisherUnique };
+                },
+              };
+            }
+            throw new Error(`Unexpected table ${table}`);
+          }),
+          get,
+        },
+      } as never,
+      { handle: "jaredforreal" },
+    );
+
+    expect(userUnique).toHaveBeenCalledOnce();
+    expect(publisherUnique).toHaveBeenCalledOnce();
+    expect(get).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+  });
 });
 
 describe("users.syncGitHubProfileInternal", () => {

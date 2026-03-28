@@ -1,7 +1,10 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery } from "./functions";
-import { ensurePersonalPublisherForUser } from "./lib/publishers";
+import {
+  ensurePersonalPublisherForUser,
+  getActiveUserByHandleOrPersonalPublisher,
+} from "./lib/publishers";
 const TRANSFER_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 
 type TransferDoc = Doc<"skillOwnershipTransfers">;
@@ -112,11 +115,8 @@ export const requestTransferInternal = internalMutation({
     const toHandle = normalizeHandle(args.toUserHandle);
     if (!toHandle) throw new Error("toUserHandle required");
 
-    const toUser = await ctx.db
-      .query("users")
-      .withIndex("handle", (q) => q.eq("handle", toHandle))
-      .first();
-    if (!toUser || toUser.deletedAt || toUser.deactivatedAt) throw new Error("User not found");
+    const toUser = await getActiveUserByHandleOrPersonalPublisher(ctx, toHandle);
+    if (!toUser) throw new Error("User not found");
     if (toUser._id === args.actorUserId) throw new Error("Cannot transfer to yourself");
 
     const activePending = await getActivePendingTransferForSkill(ctx, args.skillId, now);
