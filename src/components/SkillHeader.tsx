@@ -197,6 +197,9 @@ export function SkillHeader({
                 <h1 className="section-title" style={{ margin: 0 }}>
                   {skill.displayName}
                 </h1>
+                {latestVersion?.version ? (
+                  <span className="plugin-version-badge">v{latestVersion.version}</span>
+                ) : null}
                 {nixPlugin ? <span className="tag tag-accent">Plugin bundle (nix)</span> : null}
               </div>
               <p className="section-subtitle">{skill.summary ?? "No summary provided."}</p>
@@ -209,53 +212,83 @@ export function SkillHeader({
                   Bundles the skill pack, CLI binary, and config requirements in one Nix install.
                 </div>
               ) : null}
-              <div className="skill-hero-note">
-                <strong>{PLATFORM_SKILL_LICENSE}</strong> · {PLATFORM_SKILL_LICENSE_SUMMARY}
+
+              <div className="skill-hero-inline-meta">
+                <div className="skill-hero-stats-row">
+                  <span className="stat">⭐ {formattedStats.stars}</span>
+                  <span style={{ color: "var(--ink-soft)", opacity: 0.4 }}>·</span>
+                  <span className="stat"><Package size={14} aria-hidden="true" /> {formattedStats.downloads}</span>
+                  <span style={{ color: "var(--ink-soft)", opacity: 0.4 }}>·</span>
+                  <span className="stat">{formatCompactStat(skill.stats.installsCurrent ?? 0)} current</span>
+                  <span style={{ color: "var(--ink-soft)", opacity: 0.4 }}>·</span>
+                  <span className="stat">{formattedStats.installsAllTime} all-time</span>
+                </div>
+                <div className="skill-hero-meta-row">
+                  <UserBadge
+                    user={owner}
+                    fallbackHandle={ownerHandle}
+                    prefix="by"
+                    size="md"
+                    showName
+                  />
+                  {forkOf && forkOfHref ? (
+                    <>
+                      <span style={{ color: "var(--ink-soft)", opacity: 0.4 }}>·</span>
+                      <span className="stat">
+                        {forkOfLabel}{" "}
+                        <a href={forkOfHref}>
+                          {forkOfOwnerHandle ? `@${forkOfOwnerHandle}/` : ""}
+                          {forkOf.skill.slug}
+                        </a>
+                        {forkOf.version ? ` (${forkOf.version})` : null}
+                      </span>
+                    </>
+                  ) : null}
+                  {canonicalHref ? (
+                    <>
+                      <span style={{ color: "var(--ink-soft)", opacity: 0.4 }}>·</span>
+                      <span className="stat">
+                        canonical:{" "}
+                        <a href={canonicalHref}>
+                          {canonicalOwnerHandle ? `@${canonicalOwnerHandle}/` : ""}
+                          {canonical?.skill?.slug}
+                        </a>
+                      </span>
+                    </>
+                  ) : null}
+                </div>
               </div>
-              <div className="stat">
-                ⭐ {formattedStats.stars} · <Package size={14} aria-hidden="true" />{" "}
-                {formattedStats.downloads} · {formatCompactStat(skill.stats.installsCurrent ?? 0)}{" "}
-                current installs · {formattedStats.installsAllTime} all-time installs
+
+              <div className="skill-hero-badges">
+                <span className="tag tag-compact">{PLATFORM_SKILL_LICENSE}</span>
+                {getSkillBadges(skill).map((badge) => (
+                  <span key={badge} className="tag tag-compact">
+                    {badge}
+                  </span>
+                ))}
+                {isStaff && staffVisibilityTag ? (
+                  <span className={`tag tag-compact${isAutoHidden || isRemoved ? " tag-accent" : ""}`}>
+                    {staffVisibilityTag}
+                  </span>
+                ) : null}
               </div>
-              <div className="stat">
-                <UserBadge
-                  user={owner}
-                  fallbackHandle={ownerHandle}
-                  prefix="by"
-                  size="md"
-                  showName
-                />
+            </div>
+            <div className="skill-hero-sidebar">
+              {!nixPlugin && !modInfo?.isMalwareBlocked && !modInfo?.isRemoved ? (
+                <a
+                  className="btn btn-primary"
+                  href={`${convexSiteUrl}/api/v1/download?slug=${skill.slug}`}
+                  style={{ width: "100%", justifyContent: "center" }}
+                >
+                  Download zip
+                </a>
+              ) : null}
+              <div className="skill-hero-sidebar-meta">
+                <div className="skill-sidebar-item">
+                  <span className="skill-sidebar-label">License</span>
+                  <span className="skill-sidebar-value">{PLATFORM_SKILL_LICENSE} · {PLATFORM_SKILL_LICENSE_SUMMARY}</span>
+                </div>
               </div>
-              {forkOf && forkOfHref ? (
-                <div className="stat">
-                  {forkOfLabel}{" "}
-                  <a href={forkOfHref}>
-                    {forkOfOwnerHandle ? `@${forkOfOwnerHandle}/` : ""}
-                    {forkOf.skill.slug}
-                  </a>
-                  {forkOf.version ? ` (based on ${forkOf.version})` : null}
-                </div>
-              ) : null}
-              {canonicalHref ? (
-                <div className="stat">
-                  canonical:{" "}
-                  <a href={canonicalHref}>
-                    {canonicalOwnerHandle ? `@${canonicalOwnerHandle}/` : ""}
-                    {canonical?.skill?.slug}
-                  </a>
-                </div>
-              ) : null}
-              {getSkillBadges(skill).map((badge) => (
-                <div key={badge} className="tag">
-                  {badge}
-                </div>
-              ))}
-              <div className="tag tag-accent">{PLATFORM_SKILL_LICENSE}</div>
-              {isStaff && staffVisibilityTag ? (
-                <div className={`tag${isAutoHidden || isRemoved ? " tag-accent" : ""}`}>
-                  {staffVisibilityTag}
-                </div>
-              ) : null}
               <div className="skill-actions">
                 {isAuthenticated ? (
                   <button
@@ -268,52 +301,37 @@ export function SkillHeader({
                   </button>
                 ) : null}
                 {isAuthenticated ? (
-                  <button className="btn btn-ghost" type="button" onClick={onOpenReport}>
+                  <button className="btn btn-sm btn-ghost" type="button" onClick={onOpenReport}>
                     Report
                   </button>
                 ) : null}
                 {isStaff ? (
-                  <Link className="btn" to="/management" search={{ skill: skill.slug }}>
+                  <Link className="btn btn-sm" to="/management" search={{ skill: skill.slug }}>
                     Manage
                   </Link>
                 ) : null}
               </div>
-              {suppressScanResults ? (
-                <div className="skill-hero-note">{overrideScanMessage}</div>
-              ) : latestVersion?.sha256hash ||
-                latestVersion?.llmAnalysis ||
-                (latestVersion?.staticScan?.findings?.length ?? 0) > 0 ? (
-                <SecurityScanResults
-                  sha256hash={latestVersion?.sha256hash}
-                  vtAnalysis={latestVersion?.vtAnalysis}
-                  llmAnalysis={latestVersion?.llmAnalysis as LlmAnalysis | undefined}
-                  staticFindings={latestVersion?.staticScan?.findings}
-                />
-              ) : null}
-              {!suppressScanResults &&
-              (latestVersion?.sha256hash ||
-                latestVersion?.llmAnalysis ||
-                (latestVersion?.staticScan?.findings?.length ?? 0) > 0) ? (
-                <p className="scan-disclaimer">
-                  Like a lobster shell, security has layers — review code before you run it.
-                </p>
-              ) : null}
-            </div>
-            <div className="skill-hero-cta">
-              <div className="skill-version-pill">
-                <span className="skill-version-label">Current version</span>
-                <strong>v{latestVersion?.version ?? "—"}</strong>
-              </div>
-              {!nixPlugin && !modInfo?.isMalwareBlocked && !modInfo?.isRemoved ? (
-                <a
-                  className="btn btn-primary"
-                  href={`${convexSiteUrl}/api/v1/download?slug=${skill.slug}`}
-                >
-                  Download zip
-                </a>
-              ) : null}
             </div>
           </div>
+
+          {/* Security scan — full width below the header columns */}
+          {suppressScanResults ? (
+            <div className="skill-hero-note">{overrideScanMessage}</div>
+          ) : latestVersion?.sha256hash ||
+            latestVersion?.llmAnalysis ||
+            (latestVersion?.staticScan?.findings?.length ?? 0) > 0 ? (
+            <div className="skill-hero-scan-row">
+              <SecurityScanResults
+                sha256hash={latestVersion?.sha256hash}
+                vtAnalysis={latestVersion?.vtAnalysis}
+                llmAnalysis={latestVersion?.llmAnalysis as LlmAnalysis | undefined}
+                staticFindings={latestVersion?.staticScan?.findings}
+              />
+              <p className="scan-disclaimer">
+                Like a lobster shell, security has layers — review code before you run it.
+              </p>
+            </div>
+          ) : null}
           {hasPluginBundle ? (
             <div className="skill-panel bundle-card">
               <div className="bundle-header">
