@@ -6,21 +6,35 @@ import { Button } from "./ui/button";
 interface ErrorBoundaryProps {
   children: ReactNode;
   fallback?: ReactNode;
+  /** When this value changes the boundary resets, clearing any caught error. */
+  resetKey?: string;
 }
 
 interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
+  /** Tracks the last resetKey that was acknowledged so we can detect changes. */
+  prevResetKey?: string;
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, prevResetKey: props.resetKey };
   }
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error };
+  }
+
+  static getDerivedStateFromProps(
+    props: ErrorBoundaryProps,
+    state: ErrorBoundaryState,
+  ): Partial<ErrorBoundaryState> | null {
+    if (props.resetKey !== undefined && props.resetKey !== state.prevResetKey) {
+      return { hasError: false, error: null, prevResetKey: props.resetKey };
+    }
+    return null;
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {

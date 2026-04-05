@@ -1,4 +1,4 @@
-import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Scripts, useLocation } from "@tanstack/react-router";
 import { Analytics } from "@vercel/analytics/react";
 import { Toaster } from "sonner";
 import { AppProviders } from "../components/AppProviders";
@@ -112,9 +112,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             <ClientOnly>
               <DeploymentDriftBanner />
             </ClientOnly>
-            <ErrorBoundary>
+            <RouteErrorBoundary>
               {children}
-            </ErrorBoundary>
+            </RouteErrorBoundary>
             <Footer />
           </div>
           <Toaster
@@ -136,5 +136,15 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Scripts />
       </body>
     </html>
+  );
+}
+
+/** Resets the error boundary whenever the route pathname changes. */
+function RouteErrorBoundary({ children }: { children: React.ReactNode; }) {
+  const location = useLocation();
+  return (
+    <ErrorBoundary resetKey={location.pathname}>
+      {children}
+    </ErrorBoundary>
   );
 }
