@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { useQuery } from "convex/react";
 import {
   Ban,
   Clock3,
@@ -13,7 +14,9 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { MetricTrendCard, MetricTrendCardSkeleton } from "../../components/MetricTrendCard";
 import { Badge, type BadgeProps } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
@@ -25,6 +28,7 @@ import {
   SheetTitle,
 } from "../../components/ui/sheet";
 import { Textarea } from "../../components/ui/textarea";
+import { getActivityTrendEndDay } from "../../lib/activityTrend";
 import { buildPublisherProfileHref, buildSkillDetailHref } from "../../lib/ownerRoute";
 import {
   formatPercent,
@@ -1141,6 +1145,10 @@ function PublisherAbuseSignalInspector({
   const status = signalReviewStatus(item);
   const publisherHandle = signalPublisherHandle(item);
   const recurrenceCount = item.signal.recurrenceCount ?? 0;
+  const activityTrend = useQuery(api.publisherAbuse.getSignalActivityTrend, {
+    signalId: item.signal._id,
+    endDay: getActivityTrendEndDay(item.signal.lastSeenAt),
+  });
   const hasFreshEvidence =
     typeof item.signal.freshDownloadsSinceSnooze === "number" &&
     typeof item.signal.freshInstallsSinceSnooze === "number";
@@ -1189,6 +1197,44 @@ function PublisherAbuseSignalInspector({
       </SheetHeader>
 
       <div className="pa-sheet-body">
+        <section className="pa-zone pa-signal-trends-zone">
+          <div className="pa-section-label">30-day activity</div>
+          <div className="pa-signal-trends" aria-label="30-day activity trends">
+            <div className="pa-signal-trend">
+              <div className="pa-signal-trend-label">Downloads</div>
+              {activityTrend ? (
+                <MetricTrendCard
+                  trend={activityTrend.downloads}
+                  ariaLabel="Daily downloads over the last 30 days"
+                  periodLabel="30 days"
+                  unitLabel="download"
+                  hideIdlePeriodLabel
+                />
+              ) : activityTrend === undefined ? (
+                <MetricTrendCardSkeleton />
+              ) : (
+                <span className="pa-hint">Trend unavailable</span>
+              )}
+            </div>
+            <div className="pa-signal-trend pa-signal-trend-installs">
+              <div className="pa-signal-trend-label">Installs</div>
+              {activityTrend ? (
+                <MetricTrendCard
+                  trend={activityTrend.installs}
+                  ariaLabel="Daily installs over the last 30 days"
+                  periodLabel="30 days"
+                  unitLabel="install"
+                  hideIdlePeriodLabel
+                />
+              ) : activityTrend === undefined ? (
+                <MetricTrendCardSkeleton />
+              ) : (
+                <span className="pa-hint">Trend unavailable</span>
+              )}
+            </div>
+          </div>
+        </section>
+
         <section className="pa-zone">
           <div className="pa-section-label">Signal</div>
           <div className="pa-reason-list">
